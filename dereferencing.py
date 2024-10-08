@@ -20,7 +20,7 @@ from dereferencing import dbg
 debug = False
 if debug:
     try:
-        # https://github.com/Microsoft/ptvsd
+        # https://github.com/Microsoft/ptvsd 
         import ptvsd
         ptvsd.enable_attach(address=('0.0.0.0', 5678))
         #ptvsd.wait_for_attach()
@@ -124,7 +124,7 @@ class populate_desktop_hooks_t(idaapi.UI_Hooks):
 class deREferencing_plugin_t(idaapi.plugin_t):
     comment = ""
     help = PLUGIN_NAME
-    flags = idaapi.PLUGIN_KEEP|idaapi.PLUGIN_HIDE
+    flags = idaapi.PLUGIN_KEEP | idaapi.PLUGIN_HIDE
     wanted_name = PLUGIN_NAME
     wanted_hotkey = ""
 
