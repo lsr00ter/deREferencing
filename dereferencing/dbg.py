@@ -7,8 +7,9 @@
 import sys
 import struct
 
-import idaapi
+import ida_ida
 import idc
+import idaapi
 
 from dereferencing import regs
 
@@ -28,6 +29,7 @@ stack_segm = None
 is_pefile = False
 
 m = sys.modules[__name__]
+
 
 # -----------------------------------------------------------------------
 class DbgHooks(idaapi.DBG_Hooks):
@@ -51,11 +53,13 @@ class DbgHooks(idaapi.DBG_Hooks):
     def dbg_process_attach(self, pid, tid, ea, name, base, size):
         self.notify()
 
+
 # -----------------------------------------------------------------------
 def get_bitness():
     # compatibility IDA 9.0 and above
     if idaapi.IDA_SDK_VERSION >= 900:
         import ida_ida
+
         if ida_ida.inf_is_64bit():
             return 64
         elif ida_ida.inf_is_32bit_exactly():
@@ -66,30 +70,26 @@ def get_bitness():
             return 64
         elif info.is_32bit():
             return 32
+
+
 # -----------------------------------------------------------------------
 def get_ptrsize():
     ptr_size = None
-    bitness = get_bitness()
-    
-    if bitness == 64:
+    if ida_ida.inf_is_64bit():
         ptr_size = 8
-    elif bitness == 32:
+    elif ida_ida.inf_is_32bit_exactly():
         ptr_size = 4
     return ptr_size
 
+
 # -----------------------------------------------------------------------
 def supported_cpu():
-    cpuname = None
-    if idaapi.IDA_SDK_VERSION >= 900:
-        import ida_ida
-        cpuname = ida_ida.inf_get_procname().lower()
-    else:
-        info = idaapi.get_inf_structure()
-        cpuname = info.procname.lower()
-
+    info = ida_ida.inf_get_procname()
+    cpuname = info.lower()
     if cpuname == "metapc" or cpuname.startswith("arm") or cpuname.startswith("mips"):
         return True
     return False
+
 
 # -----------------------------------------------------------------------
 def get_thread_tib(tid):
@@ -100,15 +100,16 @@ def get_thread_tib(tid):
     if not tib_segm:
         return tib
 
-    ea  = tib_segm.start_ea
+    ea = tib_segm.start_ea
     tid_offset = m.ptr_size * 9
     while ea < tib_segm.end_ea:
-        thread_id = m.get_ptr(ea+tid_offset)
+        thread_id = m.get_ptr(ea + tid_offset)
         if thread_id == tid:
             tib = ea
             break
         ea += 0x1000
     return tib
+
 
 # -----------------------------------------------------------------------
 def get_stack_segment():
@@ -120,6 +121,7 @@ def get_stack_segment():
         return idaapi.getseg(stack_limit)
     return None
 
+
 # -----------------------------------------------------------------------
 def get_last_error():
     thread_id = idaapi.get_current_thread()
@@ -129,13 +131,16 @@ def get_last_error():
         return m.get_ptr(tib_ea + offset)
     return None
 
+
 # -----------------------------------------------------------------------
 def format_ptr(x):
     return m.mem_fmt % x
 
+
 # -----------------------------------------------------------------------
 def pack(val):
     return struct.pack(m.pack_fmt, val)
+
 
 # -----------------------------------------------------------------------
 def to_uint(val):
@@ -143,81 +148,86 @@ def to_uint(val):
         return val & 0xFFFFFFFF
     return val & 0xFFFFFFFFFFFFFFFF
 
+
 # -----------------------------------------------------------------------
 def is_process_suspended():
-    return (idaapi.get_process_state() == -1)
+    return idaapi.get_process_state() == -1
+
 
 # -----------------------------------------------------------------------
 def NtCurrentTeb():
-    return idaapi.Appcall.proto("ntdll_NtCurrentTeb", "DWORD __stdcall NtCurrentTeb(void);")()
+    return idaapi.Appcall.proto(
+        "ntdll_NtCurrentTeb", "DWORD __stdcall NtCurrentTeb(void);"
+    )()
+
 
 # -----------------------------------------------------------------------
 def GetLastError():
-    return idaapi.Appcall.proto("kernel32_GetLastError", "DWORD __stdcall GetLastError();")()
+    return idaapi.Appcall.proto(
+        "kernel32_GetLastError", "DWORD __stdcall GetLastError();"
+    )()
+
 
 # -----------------------------------------------------------------------
 def GetLastErrorEx():
     tib_ea = get_thread_tib(idaapi.get_current_thread())
     if tib_ea:
-        return idc.get_wide_dword(tib_ea+0x34)
+        return idc.get_wide_dword(tib_ea + 0x34)
     return None
+
 
 # -----------------------------------------------------------------------
 def set_thread_info():
     if m.is_pefile:
         current_thread_id = idaapi.get_current_thread()
         if m.thread_id != current_thread_id:
-            m.thread_id  = current_thread_id
+            m.thread_id = current_thread_id
             m.stack_segm = get_stack_segment()
     elif m.filetype == idaapi.f_ELF:
         pass
+
 
 # -----------------------------------------------------------------------
 def initialize():
     if m.initialized:
         return
-    
-    bitness = get_bitness()
-    if bitness == 64:
+
+    # 获取当前处理器信息
+    info = ida_ida.inf_get_procname()
+    is_64bit = ida_ida.inf_is_64bit()
+    is_32bit = ida_ida.inf_is_32bit_exactly()
+    cpu_name = info.lower()
+    is_be = ida_ida.inf_is_be()
+    filetype = ida_ida.inf_get_filetype()
+    is_pefile = filetype == ida_ida.f_PE
+    thread_id = idaapi.get_screen_ea()
+
+    if is_64bit:
         m.ptr_size = 8
         m.get_ptr = idc.get_qword
         m.mem_fmt = "%016X"
         m.pack_fmt = "<Q"
-    elif bitness == 32:
+    elif is_32bit:
         m.ptr_size = 4
         m.get_ptr = idc.get_wide_dword
         m.mem_fmt = "%08X"
         m.pack_fmt = "<L"
 
-    if idaapi.IDA_SDK_VERSION >= 900:
-        import ida_ida
-        m.cpu_name = ida_ida.inf_get_procname().lower()
-        m.is_be = ida_ida.inf_is_be()
-        m.filetype = ida_ida.inf_get_filetype()
-    else:
-        info = idaapi.get_inf_structure()
-        m.cpu_name = info.procname.lower()
-        m.is_be = idaapi.cvar.inf.is_be()
-        m.filetype = info.filetype
-        
-    m.is_pefile = (m.filetype == idaapi.f_PE)
-    m.thread_id = idaapi.get_current_thread()
+    m.cpu_name = cpu_name
+    m.is_be = is_be
+    m.filetype = filetype
+    m.is_pefile = is_pefile
+    m.thread_id = thread_id
 
     if m.cpu_name == "metapc":
-        m.registers = {
-            4: regs.x86,
-            8: regs.x64
-        }[m.ptr_size]
+        m.registers = {4: regs.x86, 8: regs.x64}[m.ptr_size]
 
     elif m.cpu_name.startswith("arm"):
-        m.registers = {
-            4: regs.arm,
-            8: regs.aarch64
-        }[m.ptr_size]
+        m.registers = {4: regs.arm, 8: regs.aarch64}[m.ptr_size]
     elif m.cpu_name.startswith("mips"):
         m.registers = regs.mips
 
     m.initialized = True
 
-# -----------------------------------------------------------------------
 
+# -----------------------------------------------------------------------
